@@ -1,5 +1,6 @@
 ;; DeepSea Biometrics Registry
-;; Implementation with tracking and permissions
+;; Version: 2.5
+;; Implements marine organism biometric data management with comprehensive structure and error handling
 
 ;; Constants and Error Codes
 (define-constant CONTRACT-OWNER tx-sender)
@@ -11,8 +12,8 @@
 
 ;; Data Validation Constants
 (define-constant MAX-DEPTH-MULTIPLIER u15000)  ;; 15,000 meters in millimeters
-(define-constant MAX-TEMP-RANGE 5000)          ;; Temperature in centikelvin
-(define-constant MAX-LIST-SIZE u100)
+(define-constant MAX-TEMP-RANGE 5000)         ;; Temperature in centikelvin
+(define-constant MAX-LIST-SIZE u1000)
 
 ;; Data Structures
 (define-map specimens
@@ -44,7 +45,7 @@
 ;; Researcher specimen tracking
 (define-map specimens-by-researcher
     { researcher: principal }
-    { specimen-ids: (list 100 uint) }
+    { specimen-ids: (list 1000 uint) }
 )
 
 ;; State Variables
@@ -78,18 +79,26 @@
     )
         (if is-add
             ;; Adding specimen
-            (if (>= (len current-ids) u100)
+            (if (>= (len current-ids) u1000)
                 ERR-LIST-FULL
                 (ok (map-set specimens-by-researcher
                     { researcher: researcher }
                     { specimen-ids: (unwrap! (as-max-len? 
-                        (append current-ids specimen-id) u100)
+                        (append current-ids specimen-id) u1000)
                         ERR-LIST-FULL) }
                 )))
-            ;; Do nothing for removal in this version
-            (ok true)
+            ;; Removing specimen
+            (ok (map-set specimens-by-researcher
+                { researcher: researcher }
+                { specimen-ids: (filter remove-specimen-id current-ids) }
+            ))
         )
     )
+)
+
+;; Helper for filtering specimen IDs
+(define-private (remove-specimen-id (id uint)) 
+    (not (is-eq id id))
 )
 
 ;; Verifies specimen ownership
@@ -198,6 +207,27 @@
                 })
             })
         ))
+    )
+)
+
+;; Transfers specimen research rights
+(define-public (transfer-specimen (specimen-id uint) (new-researcher principal))
+    (let ((specimen (unwrap! (map-get? specimens { specimen-id: specimen-id }) ERR-NOT-FOUND)))
+        ;; Verify ownership
+        (asserts! (is-specimen-owner specimen-id) ERR-NOT-AUTHORIZED)
+        
+        ;; Remove from current researcher's list
+        (try! (update-researcher-specimen-list tx-sender specimen-id false))
+        
+        ;; Add to new researcher's list
+        (try! (update-researcher-specimen-list new-researcher specimen-id true))
+        
+        ;; Update specimen ownership
+        (map-set specimens
+            { specimen-id: specimen-id }
+            (merge specimen { researcher: new-researcher })
+        )
+        (ok true)
     )
 )
 
